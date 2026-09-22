@@ -527,6 +527,21 @@ where
         if let Poll::Ready(Some(Event::EpochEnded(epoch))) = self.clock.poll_next_unpin(cx) {
             debug!("Epoch change event received: {}", epoch);
 
+            // The clock advances its epoch counter before broadcasting the
+            // corresponding event, so a receiver handed over at startup can
+            // still hold an EpochEnded that the sampled epoch already covers.
+            // Rolling that one over would pack the active epoch and reopen the
+            // epoch it just closed.
+            let active_epoch = self.current_epoch.load().get_epoch_number();
+            if epoch.next() <= active_epoch {
+                debug!(
+                    "Skipping epoch {} already covered by the active epoch {}",
+                    epoch, active_epoch
+                );
+
+                return self.poll(cx);
+            }
+
             self.start_epoch_rollover(epoch);
 
             return self.poll(cx);
